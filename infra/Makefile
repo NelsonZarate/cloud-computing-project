@@ -48,7 +48,7 @@ clean:
 	minikube delete --all
 	@echo "--- ✨ Limpeza concluída ---"
 
-deploy-all: init nike airbnb mcdonalds update-hosts curl-test
+deploy-all: init nike airbnb mcdonalds
 	@echo "--- ✅ Todos os clusters foram criados! ---"
 	@echo "Para listar: minikube profile list"
 
@@ -57,61 +57,62 @@ destroy-all: destroy-nike destroy-airbnb destroy-mcdonalds
 
 
 CLIENTS_LIST = nike airbnb mcdonalds
-ENVS_LIST = dev qa prod
 
+ENVS_airbnb   = dev prod
+ENVS_mcdonalds = dev qa beta prod
+ENVS_nike     = dev qa prod
 update-hosts:
 	@echo "--- 🔄 A atualizar /etc/hosts ---"
-	@# 1. Cria um ficheiro temporário SEM as linhas do projeto
+
 	@sed '/#TF-Project/d' /etc/hosts > /tmp/hosts.tmp
-	
-	@# 2. Escreve o conteúdo limpo de volta no /etc/hosts (mantendo o ficheiro original)
 	@cat /tmp/hosts.tmp > /etc/hosts
 	@rm /tmp/hosts.tmp
 
-	@# 3. Loop para encontrar IPs e adicionar ao hosts
 	@for client in $(CLIENTS_LIST); do \
+		case "$$client" in \
+			airbnb)    ENVS="dev prod" ;; \
+			mcdonalds) ENVS="dev qa beta prod" ;; \
+			nike)      ENVS="dev qa prod" ;; \
+		esac; \
 		if minikube status -p "$$client-cluster" >/dev/null 2>&1; then \
 			IP=$$(minikube ip -p "$$client-cluster"); \
 			DOMAINS=""; \
-			for env in $(ENVS_LIST); do \
+			for env in $$ENVS; do \
 				DOMAINS="$$DOMAINS odoo.$$env.$$client.local"; \
 			done; \
 			echo "A adicionar: $$IP -> $$DOMAINS"; \
 			echo "$$IP $$DOMAINS #TF-Project" >> /etc/hosts; \
 		else \
 			echo "⚠️  Cluster $$client-cluster está desligado (ignorado)."; \
-		fi \
+		fi; \
 	done
-	@echo "--- ✅ /etc/hosts atualizado com sucesso! ---"
 
-# Reutiliza as listas se já as definiste em cima, ou define aqui:
-TEST_CLIENTS = nike airbnb mcdonalds
-TEST_ENVS = dev qa prod
+	@echo "--- ✅ /etc/hosts atualizado com sucesso! ---"
 
 curl-test:
 	@echo "--- 📡 A iniciar bateria de testes CURL ---"
-	@for client in $(TEST_CLIENTS); do \
+	@for client in $(CLIENTS_LIST); do \
+		case "$$client" in \
+			airbnb)    ENVS="dev prod" ;; \
+			mcdonalds) ENVS="dev qa beta prod" ;; \
+			nike)      ENVS="dev qa prod" ;; \
+		esac; \
 		echo "----------------------------------------"; \
 		echo "🔍 Cliente: $$client"; \
-		for env in $(TEST_ENVS); do \
+		for env in $$ENVS; do \
 			URL="https://odoo.$$env.$$client.local"; \
-			\
-			# Faz o Curl: \
-			# -k: Ignora erro de certificado SSL \
-			# -s: Modo silencioso (sem barra de progresso) \
-			# -o /dev/null: Ignora o HTML da página \
-			# -w: Mostra apenas o código HTTPS (ex: 200, 308, 404) \
-			# --connect-timeout 2: Desiste se demorar mais de 2s \
 			STATUS=$$(curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 2 $$URL || echo "DOWN"); \
-			\
 			if [ "$$STATUS" = "DOWN" ]; then \
 				echo "   ❌ [$$env] -> Falha de Conexão (Cluster desligado?)"; \
-			elif [ "$$STATUS" = "200" ] || [ "$$STATUS" = "308" ]; then \
+			elif [ "$$STATUS" = "303" ] || [ "$$STATUS" = "308" ]; then \
 				echo "   ✅ [$$env] -> HTTPS $$STATUS (Sucesso!)"; \
 			else \
 				echo "   ⚠️ [$$env] -> HTTPS $$STATUS (Algo estranho...)"; \
-			fi \
-		done \
+			fi; \
+		done; \
 	done
 	@echo "----------------------------------------"
 	@echo "--- 🏁 Testes concluídos ---"
+
+
+test: update-hosts curl-test
