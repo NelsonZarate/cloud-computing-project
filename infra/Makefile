@@ -19,7 +19,7 @@ airbnb:
 	@echo "--- 🏠 A preparar ambiente AIRBNB ---"
 	terraform workspace select airbnb || terraform workspace new airbnb
 	terraform init
-	terraform apply -var-file="Airbnb.tfvars" -auto-approve
+	terraform apply -var-file="airbnb.tfvars" -auto-approve
 
 # --- CLIENTE MCDONALDS ---
 mcdonalds:
@@ -35,7 +35,7 @@ destroy-nike:
 
 destroy-airbnb:
 	terraform workspace select airbnb
-	terraform destroy -var-file="Airbnb.tfvars" -auto-approve
+	terraform destroy -var-file="airbnb.tfvars" -auto-approve
 
 # --- LIMPEZA TOTAL ---
 clean:
@@ -48,7 +48,7 @@ clean:
 	minikube delete --all
 	@echo "--- ✨ Limpeza concluída ---"
 
-deploy-all: nike airbnb mcdonalds
+deploy-all: init nike airbnb mcdonalds update-hosts curl-test
 	@echo "--- ✅ Todos os clusters foram criados! ---"
 	@echo "Para listar: minikube profile list"
 
@@ -60,12 +60,13 @@ CLIENTS_LIST = nike airbnb mcdonalds
 ENVS_LIST = dev qa prod
 
 update-hosts:
-	@echo "--- 🔄 A atualizar /etc/hosts (precisa de sudo) ---"
-	@# 1. Faz backup do ficheiro hosts atual por segurança
-	@sudo cp /etc/hosts /etc/hosts.backup
+	@echo "--- 🔄 A atualizar /etc/hosts ---"
+	@# 1. Cria um ficheiro temporário SEM as linhas do projeto
+	@sed '/#TF-Project/d' /etc/hosts > /tmp/hosts.tmp
 	
-	@# 2. Limpa linhas antigas criadas por este projeto (procura pela tag #TF-Project)
-	@sudo sed -i '/#TF-Project/d' /etc/hosts
+	@# 2. Escreve o conteúdo limpo de volta no /etc/hosts (mantendo o ficheiro original)
+	@cat /tmp/hosts.tmp > /etc/hosts
+	@rm /tmp/hosts.tmp
 
 	@# 3. Loop para encontrar IPs e adicionar ao hosts
 	@for client in $(CLIENTS_LIST); do \
@@ -76,14 +77,12 @@ update-hosts:
 				DOMAINS="$$DOMAINS odoo.$$env.$$client.local"; \
 			done; \
 			echo "A adicionar: $$IP -> $$DOMAINS"; \
-			echo "$$IP $$DOMAINS #TF-Project" | sudo tee -a /etc/hosts >/dev/null; \
+			echo "$$IP $$DOMAINS #TF-Project" >> /etc/hosts; \
 		else \
 			echo "⚠️  Cluster $$client-cluster está desligado (ignorado)."; \
 		fi \
 	done
 	@echo "--- ✅ /etc/hosts atualizado com sucesso! ---"
-
-# --- TESTES DE CONEXÃO (CURL) ---
 
 # Reutiliza as listas se já as definiste em cima, ou define aqui:
 TEST_CLIENTS = nike airbnb mcdonalds
@@ -101,16 +100,16 @@ curl-test:
 			# -k: Ignora erro de certificado SSL \
 			# -s: Modo silencioso (sem barra de progresso) \
 			# -o /dev/null: Ignora o HTML da página \
-			# -w: Mostra apenas o código HTTP (ex: 200, 308, 404) \
+			# -w: Mostra apenas o código HTTPS (ex: 200, 308, 404) \
 			# --connect-timeout 2: Desiste se demorar mais de 2s \
 			STATUS=$$(curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 2 $$URL || echo "DOWN"); \
 			\
 			if [ "$$STATUS" = "DOWN" ]; then \
 				echo "   ❌ [$$env] -> Falha de Conexão (Cluster desligado?)"; \
 			elif [ "$$STATUS" = "200" ] || [ "$$STATUS" = "308" ]; then \
-				echo "   ✅ [$$env] -> HTTP $$STATUS (Sucesso!)"; \
+				echo "   ✅ [$$env] -> HTTPS $$STATUS (Sucesso!)"; \
 			else \
-				echo "   ⚠️ [$$env] -> HTTP $$STATUS (Algo estranho...)"; \
+				echo "   ⚠️ [$$env] -> HTTPS $$STATUS (Algo estranho...)"; \
 			fi \
 		done \
 	done
